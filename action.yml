@@ -1,0 +1,21 @@
+# GitHub Actions adapter: `uses: <owner>/ai-review@v1` in a workflow triggered by pull_request.
+name: AI first-pass review
+description: First-pass AI review of a pull request, with any OpenAI-compatible model.
+inputs:
+  base-url: {description: OpenAI-compatible endpoint, e.g. https://api.anthropic.com/v1/, required: true}
+  model: {description: Model id, required: true}
+  api-key: {description: Provider API key (empty for a local Ollama), required: false, default: ''}
+  language: {description: Language of the report, required: false, default: English}
+  fail-on-critical: {description: Fail the job when a critical finding is reported, required: false, default: 'false'}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        AI_REVIEW_BASE_URL: ${{ inputs.base-url }}
+        AI_REVIEW_MODEL: ${{ inputs.model }}
+        AI_REVIEW_API_KEY: ${{ inputs.api-key }}
+        AI_REVIEW_LANGUAGE: ${{ inputs.language }}
+        AI_REVIEW_FAIL_ON_CRITICAL: ${{ inputs.fail-on-critical }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python3 "$GITHUB_ACTION_PATH/ai_review.py" --output ai-review.md

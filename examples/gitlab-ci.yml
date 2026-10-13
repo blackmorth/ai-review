@@ -1,0 +1,16 @@
+# In .gitlab-ci.yml. CI/CD variables: AI_REVIEW_BASE_URL, AI_REVIEW_MODEL, AI_REVIEW_API_KEY (masked),
+# AI_REVIEW_GITLAB_TOKEN (project access token, scope api, role Reporter+: CI_JOB_TOKEN cannot write notes).
+ai-review:
+  stage: test
+  image: python:3.13   # full image: it ships git
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: 0
+    AI_REVIEW_LANGUAGE: French
+  script:
+    - git clone --depth 1 --branch v1 https://github.com/blackmorth/ai-review.git /tmp/ai-review
+    - python3 /tmp/ai-review/ai_review.py --output ai-review.md
+  artifacts:
+    paths: [ai-review.md]
+    when: always
