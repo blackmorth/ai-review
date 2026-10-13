@@ -1,0 +1,27 @@
+# The tool reviews its own pull requests (local action), once the AI_REVIEW_* variables are set.
+name: AI review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]   # not "edited": a description fix is no new code
+# A new push cancels the review of the previous one.
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  ai-review:
+    if: ${{ !github.event.pull_request.draft && vars.AI_REVIEW_MODEL != '' }}
+    # Self-hosted runner (local LLM): set the repository variable AI_REVIEW_RUNNER to its label.
+    runs-on: ${{ vars.AI_REVIEW_RUNNER || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}   # the review needs the base commit
+      - uses: ./
+        with:
+          base-url: ${{ vars.AI_REVIEW_BASE_URL }}
+          model: ${{ vars.AI_REVIEW_MODEL }}
+          api-key: ${{ secrets.AI_REVIEW_API_KEY }}
+          language: French
+          reasoning-effort: ${{ vars.AI_REVIEW_REASONING_EFFORT }}

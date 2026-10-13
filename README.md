@@ -15,6 +15,9 @@ names implicit assumptions, audits risk areas (auth, access rights, money, injec
 reads callers beyond the diff, and classifies findings 🔴 critical / 🟡 warning / 💡 suggestion. It stays silent
 on what linters enforce. The size of the change is checked without AI (target 200 lines, alarm past 400 or 10 files).
 
+**Procedures, step by step** (by hand, shared Ollama on the LAN, GitHub/GitLab with an online AI or a local one,
+any other CI): [English](docs/procedures.en.md) · [Français](docs/procedures.fr.md).
+
 ## Configuration
 
 | Variable | |
@@ -24,9 +27,11 @@ on what linters enforce. The size of the change is checked without AI (target 20
 | `AI_REVIEW_API_KEY` | secret; empty for a local server |
 | `AI_REVIEW_LANGUAGE` | language of the report, default `English` |
 | `AI_REVIEW_CONTEXT_FILE` | project context, default `.ai-review.md` |
-| `AI_REVIEW_MAX_TURNS` | exploration budget, default `20` |
+| `AI_REVIEW_MAX_TURNS` | exploration turns; default sized on the diff: 6 up to 200 lines, 10 up to 400, 14 beyond |
+| `AI_REVIEW_REASONING_EFFORT` | `low`/`medium`/`high` for thinking models (Gemini, o-series): `low` is much faster; leave empty for models that reject it |
 | `AI_REVIEW_FAIL_ON_CRITICAL` | `true`: exit code 2 on a critical finding |
 | `AI_REVIEW_GITLAB_TOKEN` | GitLab only: token allowed to write MR notes |
+| `AI_REVIEW_COMMENT_AUTHOR` | GitHub only: login whose comment is updated, default `github-actions[bot]` (set it when posting with a PAT) |
 
 | Provider | `AI_REVIEW_BASE_URL` |
 |---|---|
@@ -43,6 +48,7 @@ The diff, description and files are sent to that provider: choose it according t
 
 - GitHub: `examples/github-workflow.yml` (uses `action.yml`).
 - GitLab: `examples/gitlab-ci.yml`.
-- Anything else or locally: `examples/any-ci.sh`, or
+- By hand: `bin/ai-review` (local Ollama by default, `./pr.md` as description; link it into your `PATH`).
+- Anything else: `examples/any-ci.sh`, or
   `python3 ai_review.py --base origin/main --description-file pr.md --post none`.
 - Description template for authors: `templates/change-request.md`.

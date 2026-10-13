@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ LABELS = {
 # Cisco, "Best Kept Secrets of Peer Code Review": detection collapses past 400 changed lines or 10 files.
 TARGET_LINES, MAX_LINES, MAX_FILES = 200, 400, 10
 MAX_DIFF_CHARS, MAX_TOOL_CHARS = 150_000, 20_000
+RETRY_DELAYS = [10, 30, 60, 120]
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,8 @@ class Settings:
     base_ref: str
     language: str
     context_file: str
-    max_turns: int
+    max_turns: int | None  # None: sized on the diff, see turn_budget()
+    reasoning_effort: str | None
     post: str
     fail_on_critical: bool
     output: str | None
@@ -212,18 +215,30 @@ class ChatClient:
         self.url = settings.base_url.rstrip("/") + "/chat/completions"
         self.model = settings.model
         self.api_key = settings.api_key
+        self.reasoning_effort = settings.reasoning_effort
 
     def complete(self, messages: list[dict], tools: list[dict]) -> dict:
         body = {"model": self.model, "messages": messages, "tools": tools, "temperature": 0.1}
+        if self.reasoning_effort:  # thinking models (Gemini, o-series…) think less; others may reject the field
+            body["reasoning_effort"] = self.reasoning_effort
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
-        try:
-            with urllib.request.urlopen(request, timeout=600) as response:
-                return json.load(response)["choices"][0]["message"]
-        except urllib.error.HTTPError as error:
-            raise SystemExit(f"AI provider answered {error.code}: {error.read().decode(errors='replace')[:500]}")
+        # Free tiers answer 429 (rate limit) or 503 (overloaded) often and briefly: wait and retry before giving up.
+        for attempt, delay in enumerate(RETRY_DELAYS + [None]):
+            request = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
+            try:
+                with urllib.request.urlopen(request, timeout=600) as response:
+                    return json.load(response)["choices"][0]["message"]
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode(errors="replace")[:500]
+                if error.code not in (429, 500, 502, 503, 504) or delay is None:
+                    raise SystemExit(f"AI provider answered {error.code}: {detail}")
+                retry_after = error.headers.get("Retry-After", "")
+                wait = int(retry_after) if retry_after.isdigit() else delay
+                print(f"AI provider answered {error.code}, retry {attempt + 1} in {wait}s.", file=sys.stderr)
+                time.sleep(wait)
+        raise AssertionError("unreachable")
 
 
 def build_brief(change: ChangeRequest, settings: Settings) -> str:
@@ -241,19 +256,35 @@ def build_brief(change: ChangeRequest, settings: Settings) -> str:
     )
 
 
+def turn_budget(change: ChangeRequest, settings: Settings) -> int:
+    """Each turn resends the whole conversation, so time grows faster than the turn count: a small change gets few."""
+    if settings.max_turns:
+        return settings.max_turns
+    changed_lines = change.added_lines + change.deleted_lines
+    return 6 if changed_lines <= TARGET_LINES else 10 if changed_lines <= MAX_LINES else 14
+
+
 def run_agent(change: ChangeRequest, settings: Settings) -> Review:
     tools = RepositoryTools()
     client = ChatClient(settings)
+    max_turns = turn_budget(change, settings)
     messages: list[dict] = [
         {"role": "system", "content": PROMPT_FILE.read_text()},
-        {"role": "user", "content": build_brief(change, settings)},
+        {"role": "user", "content": build_brief(change, settings)
+            + f"\n\nExploration budget: {max_turns} turns. Ask for several tool calls in the same turn."},
     ]
-    for turn in range(settings.max_turns):
-        last_turn = turn == settings.max_turns - 1
+    started = time.monotonic()
+    for turn in range(max_turns):
+        last_turn = turn == max_turns - 1
+        turn_started = time.monotonic()
         message = client.complete(messages, [] if last_turn else RepositoryTools.SPECS)
         messages.append({key: value for key, value in message.items() if value is not None})
         calls = message.get("tool_calls") or []
+        names = ", ".join(f"{c['function']['name']}({short(c['function'].get('arguments'))})" for c in calls)
+        print(f"turn {turn + 1}/{max_turns}: {time.monotonic() - turn_started:.1f}s"
+              f"{', tools: ' + names if names else ', answer'}", file=sys.stderr)
         if not calls:
+            print(f"review done in {time.monotonic() - started:.0f}s", file=sys.stderr)
             return parse_review(message.get("content") or "")
         for call in calls:
             raw_arguments = call["function"].get("arguments") or "{}"
@@ -263,9 +294,16 @@ def run_agent(change: ChangeRequest, settings: Settings) -> Review:
                 "tool_call_id": call["id"],
                 "content": tools.call(call["function"]["name"], arguments),
             })
-        if turn == settings.max_turns - 2:
+        if turn == max_turns - 2:
             messages.append({"role": "user", "content": "Exploration budget spent: answer now with the JSON."})
     raise SystemExit("The model never produced its review.")
+
+
+def short(arguments) -> str:
+    """Tool arguments for the log: the first value, cut."""
+    data = arguments if isinstance(arguments, dict) else json.loads(arguments or "{}")
+    first = next(iter(data.values()), "")
+    return str(first)[:60]
 
 
 def parse_review(content: str) -> Review:
@@ -317,7 +355,8 @@ def render_markdown(review: Review, change: ChangeRequest, settings: Settings) -
 
 
 def post_comment(body: str, target: str) -> None:
-    """Create the review comment, or update the one left by a previous run, so pushes do not pile comments up."""
+    """Create the review comment, or update the one this tool left on a previous run, so pushes do not pile comments
+    up. Only its own: a human may paste a report carrying the same marker, and editing it would be refused (403)."""
     if target == "github":
         event = github_event()
         token = os.environ.get("GITHUB_TOKEN")
@@ -327,7 +366,10 @@ def post_comment(body: str, target: str) -> None:
         api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
         comments_url = f"{api}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{event['pull_request']['number']}/comments"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-        existing = next((c for c in http("GET", comments_url + "?per_page=100", headers) if COMMENT_MARKER in c["body"]), None)
+        # GITHUB_TOKEN cannot call /user: its identity is the Actions bot, unless a PAT author is configured.
+        author = os.environ.get("AI_REVIEW_COMMENT_AUTHOR", "github-actions[bot]")
+        existing = next((c for c in http("GET", comments_url + "?per_page=100", headers)
+                         if COMMENT_MARKER in c["body"] and (c.get("user") or {}).get("login") == author), None)
         url = f"{api}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{existing['id']}" if existing else comments_url
         http("PATCH" if existing else "POST", url, headers, {"body": body})
     elif target == "gitlab":
@@ -338,7 +380,9 @@ def post_comment(body: str, target: str) -> None:
         notes_url = (f"{os.environ['CI_API_V4_URL']}/projects/{os.environ['CI_PROJECT_ID']}"
                      f"/merge_requests/{os.environ['CI_MERGE_REQUEST_IID']}/notes")
         headers = {"PRIVATE-TOKEN": token}
-        existing = next((n for n in http("GET", notes_url + "?per_page=100", headers) if COMMENT_MARKER in n["body"]), None)
+        author_id = http("GET", f"{os.environ['CI_API_V4_URL']}/user", headers)["id"]
+        existing = next((n for n in http("GET", notes_url + "?per_page=100", headers)
+                         if COMMENT_MARKER in n["body"] and (n.get("author") or {}).get("id") == author_id), None)
         url = f"{notes_url}/{existing['id']}" if existing else notes_url
         http("PUT" if existing else "POST", url, headers, {"body": body})
 
@@ -377,7 +421,8 @@ def parse_settings() -> tuple[Settings, argparse.Namespace]:
         base_ref=args.base or detect_base_ref(),
         language=env("AI_REVIEW_LANGUAGE", "English"),
         context_file=env("AI_REVIEW_CONTEXT_FILE", ".ai-review.md"),
-        max_turns=int(env("AI_REVIEW_MAX_TURNS", "20")),
+        max_turns=int(env("AI_REVIEW_MAX_TURNS")) if env("AI_REVIEW_MAX_TURNS") else None,
+        reasoning_effort=env("AI_REVIEW_REASONING_EFFORT") or None,
         post=detect_platform() if args.post == "auto" else args.post,
         fail_on_critical=args.fail_on_critical,
         output=args.output,
@@ -403,7 +448,11 @@ def main() -> int:
     if settings.json_output:
         Path(settings.json_output).write_text(json.dumps(review, default=lambda o: o.__dict__, ensure_ascii=False, indent=2))
     if settings.post != "none":
-        post_comment(report, settings.post)
+        try:
+            post_comment(report, settings.post)
+        except urllib.error.HTTPError as error:  # the report exists anyway: a posting failure must not hide it
+            print(f"Comment not posted, forge answered {error.code}: {error.read().decode(errors='replace')[:300]}",
+                  file=sys.stderr)
     return 2 if settings.fail_on_critical and review.has_critical() else 0
 
 
