@@ -342,7 +342,7 @@ def post_comment(body: str, target: str) -> None:
         # GITHUB_TOKEN cannot call /user: its identity is the Actions bot, unless a PAT author is configured.
         author = os.environ.get("AI_REVIEW_COMMENT_AUTHOR", "github-actions[bot]")
         existing = next((c for c in http("GET", comments_url + "?per_page=100", headers)
-                         if COMMENT_MARKER in c["body"] and c["user"]["login"] == author), None)
+                         if COMMENT_MARKER in c["body"] and (c.get("user") or {}).get("login") == author), None)
         url = f"{api}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{existing['id']}" if existing else comments_url
         http("PATCH" if existing else "POST", url, headers, {"body": body})
     elif target == "gitlab":
@@ -355,7 +355,7 @@ def post_comment(body: str, target: str) -> None:
         headers = {"PRIVATE-TOKEN": token}
         author_id = http("GET", f"{os.environ['CI_API_V4_URL']}/user", headers)["id"]
         existing = next((n for n in http("GET", notes_url + "?per_page=100", headers)
-                         if COMMENT_MARKER in n["body"] and n["author"]["id"] == author_id), None)
+                         if COMMENT_MARKER in n["body"] and (n.get("author") or {}).get("id") == author_id), None)
         url = f"{notes_url}/{existing['id']}" if existing else notes_url
         http("PUT" if existing else "POST", url, headers, {"body": body})
 
