@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -41,6 +42,7 @@ LABELS = {
 # Cisco, "Best Kept Secrets of Peer Code Review": detection collapses past 400 changed lines or 10 files.
 TARGET_LINES, MAX_LINES, MAX_FILES = 200, 400, 10
 MAX_DIFF_CHARS, MAX_TOOL_CHARS = 150_000, 20_000
+RETRY_DELAYS = [10, 30, 60, 120]
 
 
 @dataclass(frozen=True)
@@ -218,12 +220,21 @@ class ChatClient:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
-        try:
-            with urllib.request.urlopen(request, timeout=600) as response:
-                return json.load(response)["choices"][0]["message"]
-        except urllib.error.HTTPError as error:
-            raise SystemExit(f"AI provider answered {error.code}: {error.read().decode(errors='replace')[:500]}")
+        # Free tiers answer 429 (rate limit) or 503 (overloaded) often and briefly: wait and retry before giving up.
+        for attempt, delay in enumerate(RETRY_DELAYS + [None]):
+            request = urllib.request.Request(self.url, json.dumps(body).encode(), headers)
+            try:
+                with urllib.request.urlopen(request, timeout=600) as response:
+                    return json.load(response)["choices"][0]["message"]
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode(errors="replace")[:500]
+                if error.code not in (429, 500, 502, 503, 504) or delay is None:
+                    raise SystemExit(f"AI provider answered {error.code}: {detail}")
+                retry_after = error.headers.get("Retry-After", "")
+                wait = int(retry_after) if retry_after.isdigit() else delay
+                print(f"AI provider answered {error.code}, retry {attempt + 1} in {wait}s.", file=sys.stderr)
+                time.sleep(wait)
+        raise AssertionError("unreachable")
 
 
 def build_brief(change: ChangeRequest, settings: Settings) -> str:
