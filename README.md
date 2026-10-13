@@ -15,6 +15,9 @@ names implicit assumptions, audits risk areas (auth, access rights, money, injec
 reads callers beyond the diff, and classifies findings 🔴 critical / 🟡 warning / 💡 suggestion. It stays silent
 on what linters enforce. The size of the change is checked without AI (target 200 lines, alarm past 400 or 10 files).
 
+**Procedures, step by step** (by hand, shared Ollama on the LAN, GitHub/GitLab with an online AI or a local one,
+any other CI): [English](docs/procedures.en.md) · [Français](docs/procedures.fr.md).
+
 ## Configuration
 
 | Variable | |
@@ -43,6 +46,7 @@ The diff, description and files are sent to that provider: choose it according t
 
 - GitHub: `examples/github-workflow.yml` (uses `action.yml`).
 - GitLab: `examples/gitlab-ci.yml`.
-- Anything else or locally: `examples/any-ci.sh`, or
+- By hand: `bin/ai-review` (local Ollama by default, `./pr.md` as description; link it into your `PATH`).
+- Anything else: `examples/any-ci.sh`, or
   `python3 ai_review.py --base origin/main --description-file pr.md --post none`.
 - Description template for authors: `templates/change-request.md`.

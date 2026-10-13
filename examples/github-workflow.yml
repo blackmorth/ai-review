@@ -9,7 +9,8 @@ permissions:
 jobs:
   ai-review:
     if: ${{ !github.event.pull_request.draft }}
-    runs-on: ubuntu-24.04
+    # Self-hosted runner (local LLM): set the repository variable AI_REVIEW_RUNNER to its label.
+    runs-on: ${{ vars.AI_REVIEW_RUNNER || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}   # the review needs the base commit

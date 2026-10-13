@@ -3,13 +3,15 @@
 ai-review:
   stage: test
   image: python:3.13   # full image: it ships git
+  # tags: [ollama]   # a runner of your network, next to the local LLM
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
     GIT_DEPTH: 0
     AI_REVIEW_LANGUAGE: French
   script:
-    - git clone --depth 1 --branch v1 https://github.com/blackmorth/ai-review.git /tmp/ai-review
+    # AI_REVIEW_SOURCE: a mirror in your own GitLab when the runner must not reach the Internet.
+    - git clone --depth 1 --branch v1 "${AI_REVIEW_SOURCE:-https://github.com/blackmorth/ai-review.git}" /tmp/ai-review
     - python3 /tmp/ai-review/ai_review.py --output ai-review.md
   artifacts:
     paths: [ai-review.md]

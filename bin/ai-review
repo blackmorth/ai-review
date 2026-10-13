@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# First-pass AI review of the current branch, by hand, without CI. Local Ollama by default.
+# Usage: ai-review [base] [ai_review.py options]
+#   base defaults to the remote's default branch (origin/HEAD), else origin/main; ./pr.md is the description.
+# Another endpoint or model: AI_REVIEW_BASE_URL=http://192.168.1.10:11434/v1 AI_REVIEW_MODEL=… ai-review
+set -euo pipefail
+export AI_REVIEW_BASE_URL="${AI_REVIEW_BASE_URL:-http://localhost:11434/v1}"
+export AI_REVIEW_MODEL="${AI_REVIEW_MODEL:-qwen3-coder:30b}"
+export AI_REVIEW_LANGUAGE="${AI_REVIEW_LANGUAGE:-French}"
+# Works through a symlink (e.g. ~/bin/ai-review → <clone>/bin/ai-review).
+script="${AI_REVIEW_SCRIPT:-$(dirname "$(readlink -f "$0")")/../ai_review.py}"
+
+git fetch -q origin 2>/dev/null || true
+base="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || echo origin/main)"
+if [[ $# -gt 0 && "$1" != -* ]]; then base="$1"; shift; fi
+
+# Local Ollama: start it with a window large enough for a diff; the default one truncates it silently.
+if [[ "$AI_REVIEW_BASE_URL" == http://localhost* || "$AI_REVIEW_BASE_URL" == http://127.0.0.1* ]] \
+    && command -v ollama >/dev/null && ! pgrep -x ollama >/dev/null; then
+    (OLLAMA_CONTEXT_LENGTH=32768 nohup ollama serve >/tmp/ollama.log 2>&1 &)
+    sleep 3
+fi
+
+description=()
+[[ -f pr.md ]] && description=(--description-file pr.md)
+exec python3 "$script" --base "$base" --post none "${description[@]}" "$@"
