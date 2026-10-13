@@ -27,7 +27,8 @@ any other CI): [English](docs/procedures.en.md) · [Français](docs/procedures.f
 | `AI_REVIEW_API_KEY` | secret; empty for a local server |
 | `AI_REVIEW_LANGUAGE` | language of the report, default `English` |
 | `AI_REVIEW_CONTEXT_FILE` | project context, default `.ai-review.md` |
-| `AI_REVIEW_MAX_TURNS` | exploration budget, default `20` |
+| `AI_REVIEW_MAX_TURNS` | exploration turns; default sized on the diff: 6 up to 200 lines, 10 up to 400, 14 beyond |
+| `AI_REVIEW_REASONING_EFFORT` | `low`/`medium`/`high` for thinking models (Gemini, o-series): `low` is much faster; leave empty for models that reject it |
 | `AI_REVIEW_FAIL_ON_CRITICAL` | `true`: exit code 2 on a critical finding |
 | `AI_REVIEW_GITLAB_TOKEN` | GitLab only: token allowed to write MR notes |
 | `AI_REVIEW_COMMENT_AUTHOR` | GitHub only: login whose comment is updated, default `github-actions[bot]` (set it when posting with a PAT) |

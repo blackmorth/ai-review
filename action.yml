@@ -16,6 +16,14 @@ inputs:
     description: Language of the report
     required: false
     default: English
+  reasoning-effort:
+    description: "low, medium or high for thinking models (Gemini, o-series); empty for the others, which may reject it"
+    required: false
+    default: ''
+  max-turns:
+    description: Exploration turns; empty sizes them on the diff (6, 10 or 14)
+    required: false
+    default: ''
   fail-on-critical:
     description: Fail the job when a critical finding is reported
     required: false
@@ -29,6 +37,8 @@ runs:
         AI_REVIEW_MODEL: ${{ inputs.model }}
         AI_REVIEW_API_KEY: ${{ inputs.api-key }}
         AI_REVIEW_LANGUAGE: ${{ inputs.language }}
+        AI_REVIEW_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        AI_REVIEW_MAX_TURNS: ${{ inputs.max-turns }}
         AI_REVIEW_FAIL_ON_CRITICAL: ${{ inputs.fail-on-critical }}
         GITHUB_TOKEN: ${{ github.token }}
       run: python3 "$GITHUB_ACTION_PATH/ai_review.py" --output ai-review.md

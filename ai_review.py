@@ -53,7 +53,8 @@ class Settings:
     base_ref: str
     language: str
     context_file: str
-    max_turns: int
+    max_turns: int | None  # None: sized on the diff, see turn_budget()
+    reasoning_effort: str | None
     post: str
     fail_on_critical: bool
     output: str | None
@@ -214,9 +215,12 @@ class ChatClient:
         self.url = settings.base_url.rstrip("/") + "/chat/completions"
         self.model = settings.model
         self.api_key = settings.api_key
+        self.reasoning_effort = settings.reasoning_effort
 
     def complete(self, messages: list[dict], tools: list[dict]) -> dict:
         body = {"model": self.model, "messages": messages, "tools": tools, "temperature": 0.1}
+        if self.reasoning_effort:  # thinking models (Gemini, o-series…) think less; others may reject the field
+            body["reasoning_effort"] = self.reasoning_effort
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -252,19 +256,35 @@ def build_brief(change: ChangeRequest, settings: Settings) -> str:
     )
 
 
+def turn_budget(change: ChangeRequest, settings: Settings) -> int:
+    """Each turn resends the whole conversation, so time grows faster than the turn count: a small change gets few."""
+    if settings.max_turns:
+        return settings.max_turns
+    changed_lines = change.added_lines + change.deleted_lines
+    return 6 if changed_lines <= TARGET_LINES else 10 if changed_lines <= MAX_LINES else 14
+
+
 def run_agent(change: ChangeRequest, settings: Settings) -> Review:
     tools = RepositoryTools()
     client = ChatClient(settings)
+    max_turns = turn_budget(change, settings)
     messages: list[dict] = [
         {"role": "system", "content": PROMPT_FILE.read_text()},
-        {"role": "user", "content": build_brief(change, settings)},
+        {"role": "user", "content": build_brief(change, settings)
+            + f"\n\nExploration budget: {max_turns} turns. Ask for several tool calls in the same turn."},
     ]
-    for turn in range(settings.max_turns):
-        last_turn = turn == settings.max_turns - 1
+    started = time.monotonic()
+    for turn in range(max_turns):
+        last_turn = turn == max_turns - 1
+        turn_started = time.monotonic()
         message = client.complete(messages, [] if last_turn else RepositoryTools.SPECS)
         messages.append({key: value for key, value in message.items() if value is not None})
         calls = message.get("tool_calls") or []
+        names = ", ".join(f"{c['function']['name']}({short(c['function'].get('arguments'))})" for c in calls)
+        print(f"turn {turn + 1}/{max_turns}: {time.monotonic() - turn_started:.1f}s"
+              f"{', tools: ' + names if names else ', answer'}", file=sys.stderr)
         if not calls:
+            print(f"review done in {time.monotonic() - started:.0f}s", file=sys.stderr)
             return parse_review(message.get("content") or "")
         for call in calls:
             raw_arguments = call["function"].get("arguments") or "{}"
@@ -274,9 +294,16 @@ def run_agent(change: ChangeRequest, settings: Settings) -> Review:
                 "tool_call_id": call["id"],
                 "content": tools.call(call["function"]["name"], arguments),
             })
-        if turn == settings.max_turns - 2:
+        if turn == max_turns - 2:
             messages.append({"role": "user", "content": "Exploration budget spent: answer now with the JSON."})
     raise SystemExit("The model never produced its review.")
+
+
+def short(arguments) -> str:
+    """Tool arguments for the log: the first value, cut."""
+    data = arguments if isinstance(arguments, dict) else json.loads(arguments or "{}")
+    first = next(iter(data.values()), "")
+    return str(first)[:60]
 
 
 def parse_review(content: str) -> Review:
@@ -394,7 +421,8 @@ def parse_settings() -> tuple[Settings, argparse.Namespace]:
         base_ref=args.base or detect_base_ref(),
         language=env("AI_REVIEW_LANGUAGE", "English"),
         context_file=env("AI_REVIEW_CONTEXT_FILE", ".ai-review.md"),
-        max_turns=int(env("AI_REVIEW_MAX_TURNS", "20")),
+        max_turns=int(env("AI_REVIEW_MAX_TURNS")) if env("AI_REVIEW_MAX_TURNS") else None,
+        reasoning_effort=env("AI_REVIEW_REASONING_EFFORT") or None,
         post=detect_platform() if args.post == "auto" else args.post,
         fail_on_critical=args.fail_on_critical,
         output=args.output,

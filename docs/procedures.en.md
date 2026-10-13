@@ -144,7 +144,8 @@ Only the diff and the files the agent reads travel, between that machine and the
 2. In GitHub → Settings → Secrets and variables → Actions:
    - **Variables**: `AI_REVIEW_BASE_URL` and `AI_REVIEW_MODEL`, for instance
      `https://api.anthropic.com/v1/` + `claude-sonnet-5-5`, or `https://api.mistral.ai/v1` + `mistral-large-latest`
-     (other providers: [README](../README.md));
+     (other providers: [README](../README.md)), and for a thinking model (Gemini…)
+     `AI_REVIEW_REASONING_EFFORT` = `low`, much faster;
    - **Secret**: `AI_REVIEW_API_KEY`, the provider's key.
 3. To make a 🔴 block the merge: `fail-on-critical: 'true'` in the workflow, then make the job required
    (Settings → Branches → protection rule → *Require status checks*).
@@ -250,4 +251,5 @@ Template: [`examples/any-ci.sh`](../examples/any-ci.sh).
 | `AI provider answered 401/404` | Key, URL (often the trailing `/v1`) or model id. |
 | `Connection refused` from another PC | Ollama listens on `127.0.0.1` (`OLLAMA_HOST=0.0.0.0:11434`), firewall, or WSL without mirrored networking. |
 | GitHub job stuck "Waiting for a runner" | Self-hosted runner off, or its label differs from `AI_REVIEW_RUNNER`. |
+| Very slow review (over 5 min) | The job log gives each turn's duration. Thinking model: `AI_REVIEW_REASONING_EFFORT=low`. Fewer turns: `AI_REVIEW_MAX_TURNS`. Saturated free tier: the 429/503 retries show in the log. |
 | Report in the wrong language | `AI_REVIEW_LANGUAGE`; some small models ignore it now and then. |

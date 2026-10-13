@@ -144,7 +144,8 @@ Seul le diff et les fichiers lus par l'agent voyagent, entre ce poste et la mach
 2. Dans GitHub → Settings → Secrets and variables → Actions :
    - **Variables** : `AI_REVIEW_BASE_URL` et `AI_REVIEW_MODEL`, par exemple
      `https://api.anthropic.com/v1/` + `claude-sonnet-5-5`, ou `https://api.mistral.ai/v1` + `mistral-large-latest`
-     (autres fournisseurs : [README](../README.md)) ;
+     (autres fournisseurs : [README](../README.md)), et pour un modèle qui raisonne (Gemini…)
+     `AI_REVIEW_REASONING_EFFORT` = `low`, bien plus rapide ;
    - **Secret** : `AI_REVIEW_API_KEY`, la clé du fournisseur.
 3. Pour qu'un 🔴 bloque la fusion : `fail-on-critical: 'true'` dans le workflow, puis rendre le job obligatoire
    (Settings → Branches → règle de protection → *Require status checks*).
@@ -251,4 +252,5 @@ Modèle : [`examples/any-ci.sh`](../examples/any-ci.sh).
 | `AI provider answered 401/404` | Clé, URL (souvent le `/v1` final) ou identifiant du modèle. |
 | `Connection refused` depuis un autre PC | Ollama écoute sur `127.0.0.1` (`OLLAMA_HOST=0.0.0.0:11434`), pare-feu, ou WSL sans réseau miroir. |
 | Job GitHub bloqué « Waiting for a runner » | Runner auto-hébergé éteint ou label différent de `AI_REVIEW_RUNNER`. |
+| Review très lente (plus de 5 min) | Le journal du job donne la durée de chaque tour. Modèle qui raisonne : `AI_REVIEW_REASONING_EFFORT=low`. Moins de tours : `AI_REVIEW_MAX_TURNS`. Offre gratuite saturée : les relances 429/503 apparaissent dans le journal. |
 | Rapport dans la mauvaise langue | `AI_REVIEW_LANGUAGE` ; certains petits modèles l'ignorent parfois. |
