@@ -30,6 +30,7 @@ any other CI): [English](docs/procedures.en.md) · [Français](docs/procedures.f
 | `AI_REVIEW_MAX_TURNS` | exploration budget, default `20` |
 | `AI_REVIEW_FAIL_ON_CRITICAL` | `true`: exit code 2 on a critical finding |
 | `AI_REVIEW_GITLAB_TOKEN` | GitLab only: token allowed to write MR notes |
+| `AI_REVIEW_COMMENT_AUTHOR` | GitHub only: login whose comment is updated, default `github-actions[bot]` (set it when posting with a PAT) |
 
 | Provider | `AI_REVIEW_BASE_URL` |
 |---|---|

@@ -10,6 +10,7 @@ ai-review:
     GIT_DEPTH: 0
     AI_REVIEW_LANGUAGE: French
   script:
+    # Clones the review tool itself (shallow is enough); the reviewed repository is the job's checkout, GIT_DEPTH: 0.
     # AI_REVIEW_SOURCE: a mirror in your own GitLab when the runner must not reach the Internet.
     - git clone --depth 1 --branch v1 "${AI_REVIEW_SOURCE:-https://github.com/blackmorth/ai-review.git}" /tmp/ai-review
     - python3 /tmp/ai-review/ai_review.py --output ai-review.md

@@ -317,7 +317,8 @@ def render_markdown(review: Review, change: ChangeRequest, settings: Settings) -
 
 
 def post_comment(body: str, target: str) -> None:
-    """Create the review comment, or update the one left by a previous run, so pushes do not pile comments up."""
+    """Create the review comment, or update the one this tool left on a previous run, so pushes do not pile comments
+    up. Only its own: a human may paste a report carrying the same marker, and editing it would be refused (403)."""
     if target == "github":
         event = github_event()
         token = os.environ.get("GITHUB_TOKEN")
@@ -327,7 +328,10 @@ def post_comment(body: str, target: str) -> None:
         api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
         comments_url = f"{api}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{event['pull_request']['number']}/comments"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-        existing = next((c for c in http("GET", comments_url + "?per_page=100", headers) if COMMENT_MARKER in c["body"]), None)
+        # GITHUB_TOKEN cannot call /user: its identity is the Actions bot, unless a PAT author is configured.
+        author = os.environ.get("AI_REVIEW_COMMENT_AUTHOR", "github-actions[bot]")
+        existing = next((c for c in http("GET", comments_url + "?per_page=100", headers)
+                         if COMMENT_MARKER in c["body"] and c["user"]["login"] == author), None)
         url = f"{api}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/comments/{existing['id']}" if existing else comments_url
         http("PATCH" if existing else "POST", url, headers, {"body": body})
     elif target == "gitlab":
@@ -338,7 +342,9 @@ def post_comment(body: str, target: str) -> None:
         notes_url = (f"{os.environ['CI_API_V4_URL']}/projects/{os.environ['CI_PROJECT_ID']}"
                      f"/merge_requests/{os.environ['CI_MERGE_REQUEST_IID']}/notes")
         headers = {"PRIVATE-TOKEN": token}
-        existing = next((n for n in http("GET", notes_url + "?per_page=100", headers) if COMMENT_MARKER in n["body"]), None)
+        author_id = http("GET", f"{os.environ['CI_API_V4_URL']}/user", headers)["id"]
+        existing = next((n for n in http("GET", notes_url + "?per_page=100", headers)
+                         if COMMENT_MARKER in n["body"] and n["author"]["id"] == author_id), None)
         url = f"{notes_url}/{existing['id']}" if existing else notes_url
         http("PUT" if existing else "POST", url, headers, {"body": body})
 
@@ -403,7 +409,11 @@ def main() -> int:
     if settings.json_output:
         Path(settings.json_output).write_text(json.dumps(review, default=lambda o: o.__dict__, ensure_ascii=False, indent=2))
     if settings.post != "none":
-        post_comment(report, settings.post)
+        try:
+            post_comment(report, settings.post)
+        except urllib.error.HTTPError as error:  # the report exists anyway: a posting failure must not hide it
+            print(f"Comment not posted, forge answered {error.code}: {error.read().decode(errors='replace')[:300]}",
+                  file=sys.stderr)
     return 2 if settings.fail_on_critical and review.has_critical() else 0
 
 
